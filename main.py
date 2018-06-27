@@ -161,9 +161,9 @@ def list_all():
     if not page:
         session = Session()
         results = session.query(Posts).all()
-        count = session.query(func.count(Posts))
-        print(count)
+        count = session.query(Posts).count()
         r = {}
+        r['totalRows'] = count
         r['items'] = []
         for res in results:
             d = res.to_dict()
