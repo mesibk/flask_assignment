@@ -1,16 +1,10 @@
 import os
-import tempfile
-import pytest
+import unittest
 
 from assignment import main
 
-@pytest.fixture
-def client():
-    db_fd, main.app.config['DATABASE'] = tempfile.mkstemp()
-    main.app.config['TESTING'] = True
-    client = main.app.test_client()
+class Tests(unittest.TestCase):
 
-    with main.app.app_context():
-        main.init_db()
-
-        
+    def setup(self):
+        main.config['TESTING'] = True
+        main.config['WTF_CSRF_ENABLED'] = False

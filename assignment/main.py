@@ -1,21 +1,22 @@
 from flask import Flask, request, url_for, redirect
-from pprint import pprint
-import pymysql as mysql
+
 import requests
 import json
 import datetime
+import socket
 
 # SQLAlchemy imports
 import sqlalchemy
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import create_engine, Column, Integer, String, Float, TIMESTAMP, and_, func
+from sqlalchemy import create_engine, Column, Integer, String, Float, TIMESTAMP, and_
 from sqlalchemy.orm import sessionmaker
 
 Base = declarative_base()
 app = Flask(__name__)
-#app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://root:root@127.0.0.1/db'
 engine = create_engine('mysql://root:root@127.0.0.1/db')
 Session = sessionmaker(bind=engine)
+
+
 
 class Posts(Base):
     __tablename__ = 'posts'
@@ -30,6 +31,7 @@ class Posts(Base):
     votesUp = Column(Integer, default=0)
     votesDown = Column(Integer, default=0)
     authorId = Column(Integer)
+    createdAt = Column(TIMESTAMP)
 
     def __init_(self, title, body, uid, authorId):
         self.title = title
@@ -41,6 +43,7 @@ class Posts(Base):
         self.votesUp = 0
         self.votesDown = 0
         self.authorId = authorId
+        self.createdAt = datetime.datetime.now
 
     def to_dict(self):
         row_dict = {}
@@ -63,11 +66,11 @@ class Comments(Base):
     commentBy = Column(String)
     addedOn = Column(TIMESTAMP)
 
-    def __init__(self, postId, comment, commentBy, addedOn):
+    def __init__(self, postId, comment, commentBy):
         self.postId = postId
         self.comment = comment
         self.commentBy = commentBy
-        self.addedOn = addedOn
+        self.addedOn = datetime.datetime.now()
 
     def to_dict(self):
         row_dict = {}
@@ -115,6 +118,7 @@ def get_author_id(firstName, lastName):
 
 @app.route('/load_data')
 def load_data():
+    # empty table before everything
     number = 2
     url = 'https://content.guardianapis.com/search?api-key=08bb221a-af15-4f75-b786-daaca0a2635d&show-tags=contributor&page-size={}&q=politics&show-fields=all' \
         .format(str(number))
@@ -171,16 +175,32 @@ def list_all():
             r['items'].append(res)
     else:
         # for pagination
+        # send only number specified by 'pages'
         pass
     return json.dumps(r)
 
 
 @app.route('/comment', methods=['POST'])
 def comment():
-    print(request.form['comment'])
-    print(request.form['postId'])
-    print(request.form['createdBy'])
-    return "Comment"
+    # rating update
+    data = request.data.decode('utf-8')
+    data = data.replace("'", '"')
+    jdata = json.loads(data)
+    createdBy = jdata['createdBy']
+    comment = jdata['comment']
+    postId = jdata['postId']
+
+    session = Session()
+    comment = Comments(postId=postId, comment=comment, commentBy=createdBy)
+    try:
+        session.add(comment)
+        session.commit()
+    except Exception as e:
+        #print(e)
+        print("Comment could not be added")
+    else:
+        return redirect(url_for('list_all'))
+        # return json status
 
 
 @app.route('/vote', methods=['POST'])
@@ -190,12 +210,12 @@ def vote():
     if int(request.form['type']) == 1:
         # vote up
         post.votesUp += 1
+        # rating formula
     else:
         # vote down
         post.votesDown += 1
 
     session.commit()
-    #print(request.form['type'])
-    #print(request.form['postId'])
-    return redirect(url_for('list_all'))  
+    return redirect(url_for('list_all'))
+    # return json status
 
