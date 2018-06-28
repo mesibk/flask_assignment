@@ -17,7 +17,6 @@ engine = create_engine('mysql://root:root@127.0.0.1/db')
 Session = sessionmaker(bind=engine)
 
 
-
 class Posts(Base):
     __tablename__ = 'posts'
 
@@ -43,7 +42,7 @@ class Posts(Base):
         self.votesUp = 0
         self.votesDown = 0
         self.authorId = authorId
-        self.createdAt = datetime.datetime.now
+        self.createdAt = datetime.datetime.now()
 
     def to_dict(self):
         row_dict = {}
@@ -112,96 +111,137 @@ def get_author_id(firstName, lastName):
     authorId = session.query(Author.id).filter( \
                 and_(Author.firstName == firstName, \
                 Author.lastName == lastName)).one_or_none()
-    #print(authorId)
     return authorId[0]
 
 
 @app.route('/load_data')
 def load_data():
     # empty table before everything
-    number = 2
+    number = 100
     url = 'https://content.guardianapis.com/search?api-key=08bb221a-af15-4f75-b786-daaca0a2635d&show-tags=contributor&page-size={}&q=politics&show-fields=all' \
         .format(str(number))
     data = requests.get(url)
     data = data.json()['response']['results']
     session = Session()
-    for r in data:
-        # populate authors table
-        firstName = str(r['tags'][0]['firstName'])
-        lastName = str(r['tags'][0]['lastName'])
-        author = session.query(Author).filter(and_(Author.firstName == firstName, \
-                                                   Author.lastName == lastName)).first()
-        if not author:
-            #print(firstName)
-            #print(lastName)
-            newAuthor = Author(firstName=firstName, lastName=lastName)
-            session.add(newAuthor)
+    try:
+        for r in data:
+            # populate authors table
+            if len(r['tags']):
+                try:
+                    firstName = str(r['tags'][0]['firstName'])
+                except KeyError as e:
+                    firstName = 'default'
+                try:
+                    lastName = str(r['tags'][0]['lastName'])
+                except KeyError as e:
+                    lastName = 'default'
+            else:
+                firstName = 'default'
+                lastName = 'default'
+
+            author = session.query(Author).filter(and_(Author.firstName == firstName, \
+                                                       Author.lastName == lastName)).one_or_none()
+            if not author:
+                newAuthor = Author(firstName=firstName, lastName=lastName)
+                session.add(newAuthor)
+                session.commit()
+    except Exception as e:
+        print(type(e))
+        return json.dumps({'status': 'Error while adding authors'})
+
+    try:
+        for r in data:
+            # populate posts table
+            print(r['id'])
+            if len(r['tags']):
+                try:
+                    firstName = str(r['tags'][0]['firstName'])
+                except KeyError as e:
+                    firstName = 'default'
+                try:
+                    lastName = str(r['tags'][0]['lastName'])
+                except KeyError as e:
+                    lastName = 'default'
+            else:
+                firstName = 'default'
+                lastName = 'default'
+            authorId = get_author_id(firstName, lastName)
+            newPost = Posts(title=r['webTitle'].encode('utf-8'),
+                            body=r['fields']['body'].encode('utf-8'),
+                            uid=r['id'].encode('utf-8'),
+                            authorId=authorId)
+
+            session.add(newPost)
             session.commit()
+    except Exception as e:
+        print(e)
+        return json.dumps({'status': 'Error while adding posts'})
 
-    for r in data:
-        # populate posts table
-        firstName = str(r['tags'][0]['firstName'])
-        lastName = str(r['tags'][0]['lastName'])
-        authorId = get_author_id(firstName, lastName)
-        #print(r['fields']['body'])
-        newPost = Posts(title=r['webTitle'],
-                        body=r['fields']['body'].encode('utf-8'),
-                        uid=r['id'],
-                        authorId=authorId)
-        session.add(newPost)
-        session.commit()
+    return json.dumps({'status': 'Data added successfully'})
 
-    return str(data)
 
 @app.route('/')
 def hello_world():
-    return "Hello, world"
+    print("HERE")
+    r = {"is_claimed": "True", "rating": 3.5}
+    #r = {'is_claimed': 'True', 'rating': 3.5}
+    return json.dumps(r)
 
 
 @app.route('/list')
 def list_all():
     # add totalRows parameter to 'r'
-    page = request.args.get('page')
+    page = int(request.args.get('page'))
     session = Session()
     count = session.query(Posts).count()
+    r = {}
+    r['totalRows'] = count
+    r['items'] = []
     if not page:
         results = session.query(Posts).order_by(Posts.rating.desc())
-        r = {}
-        r['totalRows'] = count
-        r['items'] = []
         for res in results:
             d = res.to_dict()
-            res = json.dumps(d)
-            r['items'].append(res)
+            r['items'].append(d)
     else:
         # for pagination
         # send only number specified by 'pages'
-        pass
+        pageSize = 2
+        lower = pageSize*(page-1)
+        upper = pageSize*page
+        results = session.query(Posts).order_by(Posts.rating.desc())
+        results = results.limit(pageSize).offset(pageSize*(page-1)).all()
+        for res in results:
+            d = res.to_dict()
+            r['items'].append(d)
+
     return json.dumps(r)
 
 
-@app.route('/comment', methods=['POST'])
-def comment():
+@app.route('/comment/<int:postId>', methods=['POST'])
+def comment(postId):
     # rating update
     data = request.data.decode('utf-8')
     data = data.replace("'", '"')
     jdata = json.loads(data)
     createdBy = jdata['createdBy']
     comment = jdata['comment']
-    postId = jdata['postId']
-
+    postId = int(postId)
+    print(postId)
     session = Session()
-    comment = Comments(postId=postId, comment=comment, commentBy=createdBy)
+    newComment = Comments(postId=postId, comment=comment, commentBy=createdBy)
+    post = session.query(Posts).filter(Posts.id==postId).one_or_none()
+    post.commentsCount += 1
     try:
-        session.add(comment)
+        pass
+        session.add(newComment)
         session.commit()
     except Exception as e:
-        #print(e)
-        print("Comment could not be added")
+        res = {'status': 'Comment could not added'}
+        return json.dumps(res)
     else:
-        return redirect(url_for('list_all'))
         # return json status
-
+        res = {'status': 'Comment added successfully'}
+        return json.dumps(res)
 
 @app.route('/vote', methods=['POST'])
 def vote():
@@ -211,6 +251,10 @@ def vote():
         # vote up
         post.votesUp += 1
         # rating formula
+        voteCount = post.votesUp
+        commentCount = post.commentsCount
+        rating = voteCount + 0.5*commentCount
+        post.rating = rating
     else:
         # vote down
         post.votesDown += 1

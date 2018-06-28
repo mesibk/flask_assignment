@@ -3,8 +3,8 @@ DROP TABLE IF EXISTS `author`;
 
 CREATE TABLE `author` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `firstName` varchar(11) NOT NULL,
-  `lastName` varchar(11) NOT NULL,
+  `firstName` varchar(255) NOT NULL,
+  `lastName` varchar(255) NOT NULL,
   PRIMARY KEY (`id`)
 )
 
@@ -33,6 +33,7 @@ CREATE TABLE `posts` (
   `votesUp` int(11) NOT NULL,
   `votesDown` int(11) NOT NULL,
   `authorId` int(11) NOT NULL,
+  `createdAt` timestamp NOT NULL,
   PRIMARY KEY (`id`)
 )
 
