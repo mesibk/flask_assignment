@@ -182,9 +182,7 @@ def load_data():
 
 @app.route('/')
 def hello_world():
-    print("HERE")
     r = {"is_claimed": "True", "rating": 3.5}
-    #r = {'is_claimed': 'True', 'rating': 3.5}
     return json.dumps(r)
 
 
@@ -262,4 +260,18 @@ def vote():
     session.commit()
     return redirect(url_for('list_all'))
     # return json status
+
+
+@app.route('/stats')
+def stats():
+    session = Session()
+    commentCount = session.query(Comments).count()
+    postsCount = session.query(Posts).count()
+    authorCount = session.query(Author).count()
+    res = {
+        'commentCount': int(commentCount),
+        'postCount': int(postsCount),
+        'authorCount': int(authorCount)
+    }
+    return json.dumps(res)
 
