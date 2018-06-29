@@ -3,13 +3,16 @@ from flask import Flask, request, url_for, redirect
 import requests
 import json
 import datetime
-import socket
+import time
+from calendar import timegm
+
 
 # SQLAlchemy imports
 import sqlalchemy
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine, Column, Integer, String, Float, TIMESTAMP, and_
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import func
 
 Base = declarative_base()
 app = Flask(__name__)
@@ -32,7 +35,7 @@ class Posts(Base):
     authorId = Column(Integer)
     createdAt = Column(TIMESTAMP)
 
-    def __init_(self, title, body, uid, authorId):
+    def __init_(self, title, body, uid, authorId, createdAt):
         self.title = title
         self.body = body
         self.uid = uid
@@ -42,7 +45,7 @@ class Posts(Base):
         self.votesUp = 0
         self.votesDown = 0
         self.authorId = authorId
-        self.createdAt = datetime.datetime.now()
+        self.createdAt = createdAt
 
     def to_dict(self):
         row_dict = {}
@@ -59,7 +62,7 @@ class Posts(Base):
 class Comments(Base):
     __tablename__ = 'comments'
 
-    id = Column(Integer, primary_key=True, autoincrement=True, default=1)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     postId = Column(Integer)
     comment = Column(String)
     commentBy = Column(String)
@@ -152,7 +155,6 @@ def load_data():
     try:
         for r in data:
             # populate posts table
-            print(r['id'])
             if len(r['tags']):
                 try:
                     firstName = str(r['tags'][0]['firstName'])
@@ -169,7 +171,8 @@ def load_data():
             newPost = Posts(title=r['webTitle'].encode('utf-8'),
                             body=r['fields']['body'].encode('utf-8'),
                             uid=r['id'].encode('utf-8'),
-                            authorId=authorId)
+                            authorId=authorId,
+                            createdAt=r['webPublicationDate'])
 
             session.add(newPost)
             session.commit()
@@ -224,16 +227,23 @@ def comment(postId):
     createdBy = jdata['createdBy']
     comment = jdata['comment']
     postId = int(postId)
-    print(postId)
     session = Session()
     newComment = Comments(postId=postId, comment=comment, commentBy=createdBy)
     post = session.query(Posts).filter(Posts.id==postId).one_or_none()
     post.commentsCount += 1
+
+    # update post rating
+    ranking = post.votesUp + 0.5*post.commentsCount
+    diff = datetime.datetime.now() - post.lastUpdated
+    diff = diff.total_seconds()
+    ranking = ranking*1000/diff
+    post.rating = ranking
+    post.lastUpdated = datetime.datetime.now()
     try:
-        pass
         session.add(newComment)
         session.commit()
     except Exception as e:
+        print(e)
         res = {'status': 'Comment could not added'}
         return json.dumps(res)
     else:
@@ -243,23 +253,40 @@ def comment(postId):
 
 @app.route('/vote', methods=['POST'])
 def vote():
+    data = request.data.decode('utf-8')
+    data = data.replace("'", '"')
+    jdata = json.loads(data)
     session = Session()
-    post = session.query(Posts).filter(Posts.id==request.form['postId'])
-    if int(request.form['type']) == 1:
+    postId = jdata['postId']
+    type = jdata['type']
+    post = session.query(Posts).filter(Posts.id == postId).one_or_none()
+    if int(type) == 1:
         # vote up
         post.votesUp += 1
         # rating formula
         voteCount = post.votesUp
         commentCount = post.commentsCount
-        rating = voteCount + 0.5*commentCount
-        post.rating = rating
     else:
         # vote down
         post.votesDown += 1
 
-    session.commit()
-    return redirect(url_for('list_all'))
-    # return json status
+    # update post rating
+    ranking = post.votesUp + 0.5 * post.commentsCount
+    diff = datetime.datetime.now() - post.lastUpdated
+    diff = diff.total_seconds()
+    ranking = ranking * 1000 / diff
+    post.rating = ranking
+    post.lastUpdated = datetime.datetime.now()
+    try:
+        session.commit()
+    except Exception as e:
+        print(e)
+        res = {'status': 'Vote could not added'}
+        return json.dumps(res)
+    else:
+        # return json status
+        res = {'status': 'Vote added successfully'}
+        return json.dumps(res)
 
 
 @app.route('/stats')
@@ -268,10 +295,16 @@ def stats():
     commentCount = session.query(Comments).count()
     postsCount = session.query(Posts).count()
     authorCount = session.query(Author).count()
+    qry = session.query(Posts.votesUp)
+    voteUpCount = qry.with_entities(func.sum(Posts.votesUp)).scalar()
+    qry = session.query(Posts.votesDown)
+    voteDownCount = qry.with_entities(func.sum(Posts.votesDown)).scalar()
     res = {
-        'commentCount': int(commentCount),
-        'postCount': int(postsCount),
-        'authorCount': int(authorCount)
+        'Comments': int(commentCount),
+        'Posts': int(postsCount),
+        'Authors': int(authorCount),
+        'Vote Ups': int(voteUpCount),
+        'Vote Downs': int(voteDownCount)
     }
     return json.dumps(res)
 
